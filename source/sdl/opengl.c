@@ -317,8 +317,6 @@ void draw_opengl(int linear) {
     }
 }
 
-static UINT8 *opaque_bmp;
-
 void opengl_text(char *msg, int x, int y) {
     // Display the text using an opengl bitmap based on an sdl_gfx font
     // the coordinates are in characters - 0,0 being bottom left now
@@ -336,8 +334,6 @@ void opengl_text(char *msg, int x, int y) {
 	}
 	font = malloc(size);
 	load_file(name,font,size);
-	opaque_bmp = malloc(20*2*80);
-	memset(opaque_bmp,0xff,20*2*80);
 	/*
 	glGenBuffers(1,&opaque_buff);
 	glBindBuffer(GL_PIXEL_UNPACK_BUFFER,opaque_buff);
@@ -378,12 +374,19 @@ void opengl_text(char *msg, int x, int y) {
     glPixelStorei(GL_UNPACK_LSB_FIRST,0);
     if (ogl.render == 1)
 	glDisable(GL_TEXTURE_2D);
-    if (opaque_hud) {
-	// glColor3f(0.0f,1.0f,0.0f);
-	// glBindBuffer(GL_PIXEL_UNPACK_BUFFER,opaque_buff);
-	glDrawPixels(10*strlen(msg) ,20, GL_COLOR_INDEX,GL_UNSIGNED_BYTE, opaque_bmp);
-    }
 
+    if (opaque_hud) {
+	/* Making an opaque hud is actually awkward because bitmaps have only 1 color on screen, which means that we can't use a bitmap to draw the background if there's a bitmap for the foreground !
+	 * so I fall back to a quad. Well it works, and there is no slowdown, contrary to what happens if using glDrawPixels here... ! */
+	glBegin(GL_QUADS);
+	int l = strlen(msg);
+	glColor3f(0.0, 0.0, 0.0);
+	glVertex2d(x,y+20);
+	glVertex2d(x+l*10,y+20);
+	glVertex2d(x+l*10,y);
+	glVertex2d(x,y);
+	glEnd();
+    }
     glColor4f(1.0f,1.0f,1.0f,1.0f);
     // glBindBuffer(GL_PIXEL_UNPACK_BUFFER,gl_font);
     // GLubyte *zero = 0;
@@ -424,8 +427,6 @@ void finish_opengl() {
 void opengl_done() {
     if (font) free(font);
     font = NULL;
-    if (opaque_bmp)
-	free(opaque_bmp);
     delete_shaders();
     if (ogl.vendor) {
 	free(ogl.vendor);

@@ -324,11 +324,25 @@ void load_progress(char *rom,int count)
   last_tick = SDL_GetTicks();
 }
 
-void setup_curl_dlg(char *name) {
+void setup_curl_dlg(char *name,char *url) {
+    // I have to declare this as static because otherwise the gcc sanitizer yells at me for using something on the stack...
+    // I thought the labels were copied because of the translations, but maybe not after all... !
+    static char final[30];
     load_items[3].label = name;
     if (raine_cfg.no_gui)
 	return;
     delete loading_dialog;
+    if (!strstr(url,"/archive.org")) {
+	char *s = strstr(url,"://") + 3;
+	char *e = strchr(s,'/');
+	char name[20];
+	strncpy(name,s,e-s);
+	name[e-s] = 0;
+	snprintf(final,30,"from %s",name);
+	load_items[5].label = final;
+    } else
+	load_items[5].label = _("from internet archive");
+
     loading_dialog = new TDialog(_("Loading Game"),load_items);
     loading_dialog->pseudo_execute();
     loading_dialog->draw();
@@ -1015,13 +1029,13 @@ static void my_event(SDL_Event *event) {
 		display_cfg.prev_posy = display_cfg.posy;
 		display_cfg.posx = event->window.data1;
 		display_cfg.posy = event->window.data2;
-	    } else if (display_cfg.lost_focus) {
+	    } else if (display_cfg.lost_focus)
 		// some clever window managers try to change the position of the window at creation
 		// lucily it's sent while the focus has not been gained so we can compensate here
 		SDL_SetWindowPosition(win,display_cfg.posx,display_cfg.posy);
-	    }
 	} else if (event->window.event == SDL_WINDOWEVENT_MAXIMIZED) {
 	    display_cfg.maximized = 1;
+	    // prev size is initialized by a resize message received before that
 	} else if (event->window.event == SDL_WINDOWEVENT_FOCUS_GAINED)
 	    // the focus events are not directly useful for the gui, but it's still useful on window creation, I get a window restored event even if window is created with maximized flag
 	    // luckily this is sent before the window gains focus, so I ignore this of event if it has lost focus
