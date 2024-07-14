@@ -436,6 +436,8 @@ extern void key_stop_emulation_esc(void);
 extern void key_stop_emulation_tab(void);
 
 void toggle_fullscreen() {
+    if (display_cfg.maximized) return; // too crazy in windows if window is maximized
+				       // you are almost sure to loose pos, size or both
 #if SDL == 1
   resize(1);
   SetupScreenBitmap();
@@ -467,13 +469,14 @@ void toggle_fullscreen() {
   } else {
       SDL_SetWindowFullscreen(win,0);
       SDL_SetWindowSize(win,display_cfg.prev_sx,display_cfg.prev_sy);
-      SDL_SetWindowPosition(win,display_cfg.posx,display_cfg.posy); // posx & posy are not updated when switching to fullscreen
+      SDL_SetWindowPosition(win,display_cfg.posx,display_cfg.posy);
   }
   ScreenChange();
 #endif
 }
 
 static void toggle_fullscreen_keyboard() {
+    if (display_cfg.maximized) return;
   if (display_cfg.fullscreen) {
     display_cfg.fullscreen = 0;
   } else {
@@ -736,13 +739,13 @@ struct DEF_INPUT_EMU def_input_emu[] =
  { SDL_SCANCODE_F4,       0x00,           _("Quit without saving"), KMOD_ALT, key_quit     },
 };
 
-struct INPUT InputList[MAX_INPUTS];	// Max 64 control inputs in a game
+struct traine_input InputList[MAX_INPUTS];	// Max 64 control inputs in a game
 
 int InputCount;			// Number of Inputs in InputList
 
 int hat_for_moves;
 
-static void set_key_from_default(INPUT *inp)
+static void set_key_from_default(traine_input *inp)
 {
 
     inp->Key = def_input[inp->default_key & 0xFF].scancode;
@@ -813,7 +816,7 @@ static void merge_inputs(const INPUT_INFO *input_src) {
 		    // overwritten by unused/unknown -> the old input simply disappears in this case...
 		    // printf("Erase input %s, InputCount %d offset %x mask %x from %s off %x mask %x\n",InputList[n].InputName,InputCount,InputList[n].Address,InputList[n].Bit,
 			//    input_src[srcCount].name,input_src[srcCount].offset,input_src[srcCount].bit_mask);
-		    memmove(&InputList[n],&InputList[n+1],(InputCount-n)*sizeof(struct INPUT));
+		    memmove(&InputList[n],&InputList[n+1],(InputCount-n)*sizeof(struct traine_input));
 		    InputCount--;
 		    n--; continue;
 		}
@@ -851,7 +854,7 @@ static void merge_inputs(const INPUT_INFO *input_src) {
 	    // input overwritten by a hidden input, we must move the list...
 	    if (old > InputCount+1)
 		memmove(&InputList[InputCount],&InputList[InputCount+1],
-			(old-(InputCount+1))*sizeof(struct INPUT));
+			(old-(InputCount+1))*sizeof(struct traine_input));
 	    old--;
 	}
 	if (old > -1) {
@@ -864,7 +867,7 @@ static void merge_inputs(const INPUT_INFO *input_src) {
 			 InputList[n].default_key == KB_DEF_UNUSED)))) {
 		    if (old > n+1)
 			memmove(&InputList[n],&InputList[n+1],
-				(old-(n+1))*sizeof(struct INPUT));
+				(old-(n+1))*sizeof(struct traine_input));
 		    old--;
 		    n--;
 		}
@@ -1858,12 +1861,13 @@ void control_handle_event(SDL_Event *event) {
 #else
     case SDL_WINDOWEVENT:
       if ((event->window.event == SDL_WINDOWEVENT_RESIZED || event->window.event == SDL_WINDOWEVENT_SIZE_CHANGED) &&
-	      (display_cfg.screen_x != event->window.data1 || display_cfg.screen_y != event->window.data2)) {
+	      (display_cfg.screen_x != event->window.data1 || display_cfg.screen_y != event->window.data2) &&
+	      !display_cfg.maximized) {
 	  display_cfg.prev_sx = display_cfg.screen_x;
 	  display_cfg.prev_sy = display_cfg.screen_y;
 	  resize(1,event->window.data1,event->window.data2);
-      } else if (event->window.event == SDL_WINDOWEVENT_MOVED) {
-	  if (!display_cfg.maximized && !display_cfg.fullscreen && !display_cfg.lost_focus) {
+      } else if (event->window.event == SDL_WINDOWEVENT_MOVED && !display_cfg.maximized) {
+	  if (!display_cfg.maximized && !display_cfg.fullscreen && !display_cfg.lost_focus && (display_cfg.posx != event->window.data1 || display_cfg.posy != event->window.data2)) {
 	      display_cfg.prev_posx = display_cfg.posx;
 	      display_cfg.prev_posy = display_cfg.posy;
 	      display_cfg.posx = event->window.data1;
@@ -1876,16 +1880,17 @@ void control_handle_event(SDL_Event *event) {
 	  display_cfg.lost_focus = 1;
       if (event->window.event == SDL_WINDOWEVENT_MAXIMIZED) {
 	  display_cfg.maximized = 1;
+      } else if (event->window.event == SDL_WINDOWEVENT_MINIMIZED) {
+	  display_cfg.maximized = 2;
       } else if (event->window.event == SDL_WINDOWEVENT_RESTORED) {
-	  if (!display_cfg.lost_focus) {
+	  if (!display_cfg.lost_focus && !display_cfg.fullscreen && display_cfg.maximized != 2) {
 	      SDL_SetWindowPosition(win,display_cfg.prev_posx,display_cfg.prev_posy);
 	      SDL_SetWindowSize(win,display_cfg.prev_sx,display_cfg.prev_sy);
 	      display_cfg.posx = display_cfg.prev_posx;
 	      display_cfg.posy = display_cfg.prev_posy;
-	      display_cfg.screen_x = display_cfg.prev_sx;
-	      display_cfg.screen_y = display_cfg.prev_sy;
-	      display_cfg.maximized = 0;
+	      resize(1,display_cfg.prev_sx,display_cfg.prev_sy);
 	  }
+	  display_cfg.maximized = 0;
       }
 #endif
       break;

@@ -62,6 +62,9 @@
 #include "starhelp.h"
 #include "m6502hlp.h"
 #include "ips.h"
+#include "curl.h"
+
+// #define DEBUG_WINDOW_EVENTS 1
 
 static time_t played_time;
 #if USE_MUSASHI == 2
@@ -348,12 +351,21 @@ void setup_curl_dlg(char *name,char *url) {
     loading_dialog->draw();
 }
 
-void curl_progress_f(int count) {
-    if (!loading_dialog) return;
+int curl_progress_f(int count) {
+    if (!loading_dialog) return 1;
     if (curl_progress != count) {
 	curl_progress = count;
 	loading_dialog->redraw_fg_layer();
     }
+    loading_dialog->event_loop();
+    if (loading_dialog->want_exit()) {
+	loading_dialog->end_pseudo_execute();
+	delete loading_dialog;
+	load_items[3].label = NULL;
+	loading_dialog = NULL;
+	return 1;
+    }
+    return 0;
 }
 
 void load_message(char *msg) {
@@ -479,7 +491,7 @@ static void do_load_game(void)
    case LOAD_WARNING:			// WARNING - IT MIGHT RUN OK
 
      strcat(load_debug,_("\nThe game might not run correctly."));
-     MessageBox(_("Loading problem"), load_debug);
+     raine_mbox(_("Loading problem"), load_debug);
 
    case 0x00:				// SUCCESS
      memcpy(&prev_display_cfg, &display_cfg, sizeof(DISPLAY_CFG));
@@ -516,7 +528,7 @@ static void do_load_game(void)
    case LOAD_FATAL_ERROR:			// FATAL ERROR - REMOVE GAME
    case LOAD_FATAL_ERROR|LOAD_WARNING:
 
-     MessageBox(_("Loading error"),load_debug);
+     raine_mbox(_("Loading error"),load_debug);
 
      ClearDefault();
 
@@ -526,7 +538,7 @@ static void do_load_game(void)
    }
 
    if (*error)
-       MessageBox(_("IPS error"),error,"OK");
+       raine_mbox(_("IPS error"),error,"OK");
    free(load_debug);
 }
 
@@ -651,7 +663,7 @@ static void save_ips_ini(char **res) {
     printf("save_ips_ini %s\n",game);
     FILE *g = fopen(game,"w");
     if (!g) {
-	MessageBox("Error","Can't create ini file","ok");
+	raine_mbox("Error","Can't create ini file","ok");
 	return;
     }
     ips_info.nb = 0; // just to be sure, but normally already at 0
@@ -869,7 +881,7 @@ static void my_multi_fsel(char *mypath, char **ext, char **res_str, int max_res,
       fsel_dlg->execute();
   }
   catch(const char *msg) {
-      MessageBox(_("Error"),(char*)msg,"Ok");
+      raine_mbox(_("Error"),(char*)msg,"Ok");
   }
   delete fsel_dlg;
 }
@@ -1003,6 +1015,12 @@ extern UINT32 videoflags; // display.c
 #endif
 int goto_debuger = 0;
 
+#if DEBUG_WINDOW_EVENTS
+#define debug printf
+#else
+#define debug(message)
+#endif
+
 #if SDL == 2
 static void my_event(SDL_Event *event) {
     switch (event->type) {
@@ -1018,13 +1036,18 @@ static void my_event(SDL_Event *event) {
 	break;
     case SDL_WINDOWEVENT:
 	if (event->window.event == SDL_WINDOWEVENT_RESIZED || event->window.event == SDL_WINDOWEVENT_SIZE_CHANGED) {
+	    debug("resized\n");
 	    if (!display_cfg.maximized && !display_cfg.fullscreen && (display_cfg.screen_x != event->window.data1 || display_cfg.screen_y != event->window.data2)) {
 		display_cfg.prev_sx = display_cfg.screen_x;
 		display_cfg.prev_sy = display_cfg.screen_y;
 		resize(1,event->window.data1,event->window.data2);
 	    }
 	} else if (event->window.event == SDL_WINDOWEVENT_MOVED) {
-	    if (!display_cfg.maximized && !display_cfg.fullscreen && !display_cfg.lost_focus) {
+	    debug("moved\n");
+	    if (!display_cfg.maximized && !display_cfg.fullscreen) {
+		/* There was a && !display_cfg.lost_focus here, mainly for linux with windowmaker because otherwise if you start with a maximized window, then restores it, you'll loose the position.
+		 * Now in windows you get a lost_focus when launching from the explorer and playing with the maximize button, which is extremely annoying.
+		 * I am not going to test multiple window managers in linux, so I just remove the test on lost_focus for now. Eventually one day improve this if some other window manager is tested */
 		display_cfg.prev_posx = display_cfg.posx;
 		display_cfg.prev_posy = display_cfg.posy;
 		display_cfg.posx = event->window.data1;
@@ -1034,24 +1057,35 @@ static void my_event(SDL_Event *event) {
 		// lucily it's sent while the focus has not been gained so we can compensate here
 		SDL_SetWindowPosition(win,display_cfg.posx,display_cfg.posy);
 	} else if (event->window.event == SDL_WINDOWEVENT_MAXIMIZED) {
+	    debug("maximized\n");
 	    display_cfg.maximized = 1;
 	    // prev size is initialized by a resize message received before that
-	} else if (event->window.event == SDL_WINDOWEVENT_FOCUS_GAINED)
+	} else if (event->window.event == SDL_WINDOWEVENT_FOCUS_GAINED) {
+	    debug("focus gained\n");
 	    // the focus events are not directly useful for the gui, but it's still useful on window creation, I get a window restored event even if window is created with maximized flag
 	    // luckily this is sent before the window gains focus, so I ignore this of event if it has lost focus
 	    display_cfg.lost_focus = 0;
-	else if (event->window.event == SDL_WINDOWEVENT_FOCUS_LOST)
+	} else if (event->window.event == SDL_WINDOWEVENT_FOCUS_LOST) {
+	    debug("focus lost\n");
 	    display_cfg.lost_focus = 1;
-	else if (event->window.event == SDL_WINDOWEVENT_RESTORED) {
-	    if (!display_cfg.lost_focus) {
+	} else if (event->window.event == SDL_WINDOWEVENT_MINIMIZED) {
+	    debug("minimized\n");
+	    display_cfg.maximized = 2;
+	} else if (event->window.event == SDL_WINDOWEVENT_RESTORED) {
+	    debug("restored\n");
+	    /* About lost_focus here : when launched from the explorer in windows when restoring from maximzed state, you get a lost_focus just before that.
+	     * But NOT when launched from a msys2 terminal !!!
+	     * I was using lost_focus here mainly to prevent windowmaker from restoring a maximized window on creation but after all it's probably better to avoid lost_focus here
+	     * in all cases */
+	    if (display_cfg.maximized != 2) {
 		SDL_SetWindowPosition(win,display_cfg.prev_posx,display_cfg.prev_posy);
 		SDL_SetWindowSize(win,display_cfg.prev_sx,display_cfg.prev_sy);
 		display_cfg.posx = display_cfg.prev_posx;
 		display_cfg.posy = display_cfg.prev_posy;
 		display_cfg.screen_x = display_cfg.prev_sx;
 		display_cfg.screen_y = display_cfg.prev_sy;
-		display_cfg.maximized = 0;
 	    }
+	    display_cfg.maximized = 0;
 	}
     }
 }

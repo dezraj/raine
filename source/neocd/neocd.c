@@ -370,7 +370,7 @@ void setup_neocd_bios() {
   } while (1);
 
   if (!ret) {
-      MessageBox(gettext("Fatal error"), gettext("Find the Neo-Geo CD BIOS (neocd.bin).\nAsk Google if you can't find it!"),gettext("OK"));
+      raine_mbox(gettext("Fatal error"), gettext("Find the Neo-Geo CD BIOS (neocd.bin).\nAsk Google if you can't find it!"),gettext("OK"));
       exit(1);
   }
 
@@ -1264,7 +1264,7 @@ static void save_memcard() {
     }
     if (!is_neocd() && saveram.ram) {
 	if (saveram.unlock) {
-	    MessageBox(gettext("Warning"), gettext("Can't save the backup RAM, it's unlocked"),gettext("OK"));
+	    raine_mbox(gettext("Warning"), gettext("Can't save the backup RAM, it's unlocked"),gettext("OK"));
 	    return;
 	}
 
@@ -2204,6 +2204,12 @@ static void neogeo_hreset(void)
     // Setting these 2 to 255 emulates standard inputs, it's not really required, but it makes a cleaner test mode for inputs
     mx = my = 255;
     if (GameMouse == 3) mx = 0;
+    aes = (neogeo_bios == 22 || neogeo_bios == 23);
+    if (aes)
+	input_buffer[5] &= 0x7f;
+    else
+	input_buffer[5] |= 0x80;
+    input_buffer[5] &= 0x8f; // insert memory card, writable
   frame_count = 0;
   fix_cur = -1;
   fix_write = 0;
@@ -2283,11 +2289,6 @@ static void neogeo_hreset(void)
       s68000context.areg[7] = ReadLongSc(&ROM[0]); // required for at least fatfury3 !
       s68000context.pc = ReadLongSc(&ROM[4]); // required for at least fatfury3 !
 #endif
-      aes = (neogeo_bios == 22 || neogeo_bios == 23);
-      if (aes)
-	  input_buffer[5] &= 0x7f;
-      else
-	  input_buffer[5] |= 0x80;
   }
   s68000GetContext(&M68000_context[0]);
   watchdog_counter = 9;
